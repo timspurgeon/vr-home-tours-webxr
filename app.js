@@ -17,20 +17,38 @@ document.body.appendChild(VRButton.createButton(renderer));
 
 // ---------- Video element / texture ----------
 const video = document.createElement('video');
-video.crossOrigin = 'anonymous';   // required for cross-origin hosts that send CORS headers
-video.playsInline = true;          // iOS/Android inline playback
-video.muted = true;                // crucial for autoplay to work
-video.setAttribute('muted','');    // ensure muted flag is applied
+video.crossOrigin = 'anonymous';   // cross-origin hosts need proper CORS to texture
+video.playsInline = true;          // mobile inline playback
+video.muted = true;                // autoplay-friendly
+video.setAttribute('muted','');    // enforce muted in all engines
 video.preload = 'metadata';
 video.controls = false;
 
 const videoTexture = new THREE.VideoTexture(video);
 videoTexture.colorSpace = THREE.SRGBColorSpace;
 
-// helpful diagnostics
-['error','stalled','abort','waiting','canplay','playing','pause','ended'].forEach(evt => {
+// Diagnostics (shows in the status line)
+['error','stalled','abort','waiting','canplay','playing','pause','ended','loadeddata'].forEach(evt => {
   video.addEventListener(evt, () => setStatus(`video: ${evt}`));
 });
+video.addEventListener('error', () => {
+  const code = video.error ? video.error.code : 'unknown';
+  setStatus(`Video error (code ${code}). If your file plays directly but not here, it may be HEVC/H.265 — re-encode to H.264/AAC.`);
+});
+
+// ---------- Helpers ----------
+function setStatus(msg) {
+  const el = document.getElementById('status');
+  if (el) el.textContent = msg;
+  console.log('[VRHomeTours]', msg);
+}
+
+// Encode spaces etc. for relative paths like "./Screen Recording.mp4"
+function safeSrc(url) {
+  if (!url) return url;
+  if (url.includes('://')) return url;      // absolute URL: leave it
+  return encodeURI(url);                     // relative file: encode spaces
+}
 
 // ---------- 360 sphere ----------
 const sphereRadius = 10;
@@ -44,7 +62,7 @@ scene.add(sphere);
 // ---------- Curved 2D screen ----------
 function buildCurvedScreen(width = 3.2, height = 1.8, fovDeg = 95, distance = 2.2) {
   const theta = THREE.MathUtils.degToRad(fovDeg);
-  const R = width / theta;
+  const R = width / theta; // L=R*theta -> R=L/theta
   const geom = new THREE.CylinderGeometry(R, R, height, Math.max(12, Math.floor(fovDeg/2)), 1, true, -theta/2, theta);
   const mat = new THREE.MeshBasicMaterial({ map: videoTexture, side: THREE.FrontSide });
   const mesh = new THREE.Mesh(geom, mat);
@@ -87,7 +105,8 @@ function buildRay(controller) {
 buildRay(controller1); buildRay(controller2);
 scene.add(controller1, controller2);
 
-import { Raycaster, Matrix4, Vector3 } from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+// Use THREE namespace (avoid second import)
+const Raycaster = THREE.Raycaster, Matrix4 = THREE.Matrix4, Vector3 = THREE.Vector3;
 const raycaster = new Raycaster();
 function handleSelect(ctrl) {
   const mat = new Matrix4().extractRotation(ctrl.matrixWorld);
@@ -108,7 +127,6 @@ controller2.addEventListener('selectstart', () => handleSelect(controller2));
 // ---------- Playlist / manifest ----------
 let playlist = [];   // { title, url, mode: '360'|'2d' }
 let index = -1;
-let is360 = false;
 
 async function loadManifest() {
   try {
@@ -126,7 +144,7 @@ async function loadManifest() {
   }
 }
 
-function detectIs360(entry) {
+function is360(entry) {
   if (entry.mode) return entry.mode.toLowerCase().includes('360');
   return /360/i.test(entry.title || '') || /360/i.test(entry.url || '');
 }
@@ -134,33 +152,27 @@ function detectIs360(entry) {
 async function loadVideo(src) {
   if (!src) return;
   video.pause();
-  video.src = src;
+  video.src = safeSrc(src);
   video.load();
-  await new Promise(res => {
-    if (video.readyState >= 2) res();
-    else {
-      const onCanPlay = () => { video.removeEventListener('canplay', onCanPlay); res(); };
-      video.addEventListener('canplay', onCanPlay);
-    }
-  });
+  // do not block Start on long 'canplay' waits; playing will trigger events
 }
 
 async function playIndex(i) {
   if (!playlist.length) return;
   index = (i + playlist.length) % playlist.length;
   const entry = playlist[index];
-  is360 = detectIs360(entry);
 
-  sphere.visible = is360;
-  screen.visible = !is360;
+  sphere.visible = is360(entry);
+  screen.visible = !is360(entry);
 
   await loadVideo(entry.url);
 
   try {
-    await video.play();
-    setStatus(`Playing ${index+1}/${playlist.length}: ${entry.title} (${is360 ? '360' : '2D'})`);
+    await video.play(); // Start was a user gesture, so this should succeed when muted
+    setStatus(`Playing ${index+1}/${playlist.length}: ${entry.title} (${is360(entry) ? '360' : '2D'})`);
+    document.getElementById('overlay').style.display = 'none';
   } catch (e) {
-    setStatus(`Playback blocked: ${e.message}. Click Play/Pause once, then Start again.`);
+    setStatus(`Autoplay blocked: ${e.message}. Click Play/Pause once, then Start again.`);
   }
 }
 
@@ -177,12 +189,6 @@ const nextBtn = document.getElementById('nextBtn');
 const fileInput = document.getElementById('fileInput');
 const loadManifestBtn = document.getElementById('loadManifestBtn');
 
-function setStatus(msg) {
-  const el = document.getElementById('status');
-  if (el) el.textContent = msg;
-  console.log('[VRHomeTours]', msg);
-}
-
 async function ensureInitialLoad() {
   if (!playlist.length) await loadManifest();
   if (!playlist.length) setStatus('No videos yet. Use “Add Local Videos” or provide tours.json.');
@@ -192,15 +198,13 @@ startBtn.addEventListener('click', async () => {
   await ensureInitialLoad();
   if (!playlist.length) { setStatus('No videos found. Add a local MP4 or fix tours.json.'); return; }
   await playIndex(0);
-  if (!video.paused) document.getElementById('overlay').style.display = 'none';
 });
 
 enterVRBtn.addEventListener('click', async () => {
   await ensureInitialLoad();
   if (!playlist.length) { setStatus('No videos found. Add a local MP4 or fix tours.json.'); return; }
   await playIndex(0);
-  if (!video.paused) document.getElementById('overlay').style.display = 'none';
-  // VRButton manages session; nothing else here.
+  // VRButton manages the session
 });
 
 playBtn.addEventListener('click', playPause);
