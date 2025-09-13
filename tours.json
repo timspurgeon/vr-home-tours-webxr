@@ -1,0 +1,14 @@
+{
+  "videos": [
+    {
+      "title": "Sample 360 \u2014 replace with your MP4 URL",
+      "url": "https://storage.googleapis.com/vr360-videos/sample-360.mp4",
+      "mode": "360"
+    },
+    {
+      "title": "Sample 2D walkthrough \u2014 replace with your MP4 URL",
+      "url": "https://storage.googleapis.com/vr360-videos/sample-2d.mp4",
+      "mode": "2d"
+    }
+  ]
+}

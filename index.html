@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>VR Home Tours (WebXR)</title>
+  <style>
+    html, body { margin:0; padding:0; height:100%; background:#000; color:#fff; font-family:system-ui, sans-serif; }
+    #overlay {
+      position: fixed; inset: 0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0.75), rgba(0,0,0,0.95));
+      gap: 14px; text-align:center; padding: 20px;
+    }
+    .btn { padding: 10px 16px; background:#1e88e5; color:#fff; border-radius:8px; border:0; font-weight:600; cursor:pointer; }
+    .btn:active { transform: translateY(1px); }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; }
+    #status { opacity:.8; font-size:13px; }
+    a { color:#90caf9; }
+  </style>
+</head>
+<body>
+  <div id="overlay">
+    <h1>VR Home Tours</h1>
+    <p>Load your real-estate walkthrough videos (360° or normal) and view them in VR on Meta Quest — no Unity required.</p>
+    <div class="row">
+      <button id="startBtn" class="btn">Start (2D Mode in Page)</button>
+      <button id="enterVRBtn" class="btn">Enter VR</button>
+    </div>
+    <div class="row">
+      <button id="playBtn" class="btn">Play/Pause</button>
+      <button id="prevBtn" class="btn">Prev</button>
+      <button id="nextBtn" class="btn">Next</button>
+    </div>
+    <div class="row">
+      <label class="btn">
+        <input id="fileInput" type="file" accept="video/mp4,video/webm" multiple style="display:none;">
+        Add Local Videos
+      </label>
+      <button id="loadManifestBtn" class="btn">Load tours.json</button>
+    </div>
+    <div id="status">Tip: 360° videos should be equirectangular MP4s. Filenames containing “360” auto-mark as 360 if mode isn’t set.</div>
+  </div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
