@@ -3,7 +3,8 @@ import { VRButton } from 'https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRB
 
 /* ---------- helpers ---------- */
 function setStatus(msg){ const el=document.getElementById('status'); if(el) el.textContent=msg; console.log('[VRHomeTours]', msg); }
-function safeSrc(url){ if(!url) return url; return url.includes('://') ? url : encodeURI(url); } // handles spaces safely
+function safeSrc(url){ if(!url) return url; return url.includes('://') ? url : encodeURI(url); }
+const inXR = () => renderer.xr.isPresenting;
 
 /* ---------- renderer / scene ---------- */
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
@@ -17,14 +18,9 @@ scene.background = new THREE.Color(0x000000);
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
 scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-/* Show VR button only if WebXR is actually available */
+/* VR button only if available */
 if (navigator.xr?.isSessionSupported) {
-  navigator.xr.isSessionSupported('immersive-vr').then(supported => {
-    if (supported) document.body.appendChild(VRButton.createButton(renderer));
-    else console.log('WebXR not supported here — 2D mode only.');
-  });
-} else {
-  console.log('WebXR API missing — 2D mode only.');
+  navigator.xr.isSessionSupported('immersive-vr').then(s => { if (s) document.body.appendChild(VRButton.createButton(renderer)); });
 }
 
 /* ---------- video / texture ---------- */
@@ -41,36 +37,29 @@ videoTexture.minFilter = THREE.LinearFilter;
 videoTexture.magFilter = THREE.LinearFilter;
 videoTexture.generateMipmaps = false;
 
-/* keep the texture “hot” for Firefox */
+/* keep texture hot for Firefox */
 let forceUpdate = false;
 video.addEventListener('playing', ()=>{ forceUpdate = true; });
 video.addEventListener('pause',   ()=>{ forceUpdate = false; });
 
+/* diagnostics */
 ['error','stalled','abort','waiting','canplay','playing','pause','ended','loadeddata','loadedmetadata','timeupdate']
   .forEach(evt => video.addEventListener(evt, () => setStatus('video: '+evt)));
-
 video.addEventListener('error', () => {
   const MAP={1:'ABORTED',2:'NETWORK',3:'DECODE (likely HEVC/H.265)',4:'SRC_NOT_SUPPORTED'};
   setStatus(`Video error: ${MAP[video.error?.code]||video.error?.code||'unknown'}. If 3/4, re-encode to H.264/AAC.`);
 });
 
-/* ---------- screens / geometry ---------- */
-function buildCurvedScreen(width=3.2,height=1.8,fovDeg=95,distance=2.2){
-  const theta=THREE.MathUtils.degToRad(fovDeg), R=width/theta;
-  const geom=new THREE.CylinderGeometry(R,R,height,Math.max(12,Math.floor(fovDeg/2)),1,true,-theta/2,theta);
-  const mat=new THREE.MeshBasicMaterial({ map: videoTexture, side: THREE.FrontSide });
-  const mesh=new THREE.Mesh(geom,mat);
-  mesh.position.set(0,1.4,-(distance+R));
-  mesh.rotation.y=Math.PI;
-  return mesh;
-}
-const flatScreen = new THREE.Mesh(new THREE.PlaneGeometry(3.2,1.8), new THREE.MeshBasicMaterial({ map: videoTexture }));
-flatScreen.position.set(0,1.4,-2.2);
+/* ---------- screens ---------- */
+const flatScreen = new THREE.Mesh(new THREE.PlaneGeometry(1,1), new THREE.MeshBasicMaterial({ map: videoTexture }));
 scene.add(flatScreen);
 
-const curvedScreen = buildCurvedScreen(); // initially hidden
-curvedScreen.visible = false;
-scene.add(curvedScreen);
+function buildCurvedGeom(width=3.2,height=1.8,fovDeg=95){
+  const theta=THREE.MathUtils.degToRad(fovDeg), R=width/theta;
+  return new THREE.CylinderGeometry(R,R,height,Math.max(24,Math.floor(fovDeg/1.8)),1,true,-theta/2,theta);
+}
+const curvedScreen = new THREE.Mesh(buildCurvedGeom(), new THREE.MeshBasicMaterial({ map: videoTexture, side: THREE.FrontSide }));
+curvedScreen.visible=false; scene.add(curvedScreen);
 
 const sphere = new THREE.Mesh(
   new THREE.SphereGeometry(10, 64, 64),
@@ -78,18 +67,46 @@ const sphere = new THREE.Mesh(
 );
 sphere.visible = false; scene.add(sphere);
 
-/* ---------- simple in-VR buttons (Prev/Play/Next) ---------- */
+/* ---------- layout (contain fit) ---------- */
+const curvedToggle = document.getElementById('curvedToggle');
+function videoAspect(){ return (video.videoWidth && video.videoHeight) ? (video.videoWidth / video.videoHeight) : (16/9); }
+function layoutScreens(){
+  const d = inXR() ? 2.2 : 2.0;
+  const y = inXR() ? 1.4 : 0.0;
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  const visH = 2 * d * Math.tan(THREE.MathUtils.degToRad(camera.fov/2));
+  const visW = visH * camera.aspect;
+
+  const a = videoAspect(), maxW = visW * 0.95, maxH = visH * 0.95;
+  let targetW = maxW, targetH = targetW / a;
+  if (targetH > maxH){ targetH = maxH; targetW = targetH * a; }
+
+  const use360 = sphere.visible;
+
+  flatScreen.visible  = !use360 && !(curvedToggle && curvedToggle.checked);
+  curvedScreen.visible= !use360 &&  (curvedToggle && curvedToggle.checked);
+
+  flatScreen.position.set(0, y, -d);
+  flatScreen.scale.set(targetW, targetH, 1);
+
+  if (curvedScreen.visible){
+    const old = curvedScreen.geometry;
+    curvedScreen.geometry = buildCurvedGeom(targetW, targetH, 95);
+    old.dispose();
+    curvedScreen.position.set(0, y, -0.001);
+  }
+}
+
+/* ---------- in-VR buttons ---------- */
 const panel = new THREE.Group();
 const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.24), new THREE.MeshBasicMaterial({ color:0x111111 }));
 bg.position.set(0,0,0); panel.add(bg);
-function makeButton(label,x){ const g=new THREE.Group();
-  const base=new THREE.Mesh(new THREE.PlaneGeometry(0.25,0.12), new THREE.MeshBasicMaterial({ color:0x1e88e5 }));
-  base.position.set(x,0,0.001); base.userData.type=label; g.add(base); return g; }
+function makeButton(label,x){ const g=new THREE.Group(); const base=new THREE.Mesh(new THREE.PlaneGeometry(0.25,0.12), new THREE.MeshBasicMaterial({ color:0x1e88e5 })); base.position.set(x,0,0.001); base.userData.type=label; g.add(base); return g; }
 const btnPrev=makeButton('prev',-0.3), btnPlay=makeButton('play',0), btnNext=makeButton('next',0.3);
 panel.add(btnPrev,btnPlay,btnNext); panel.position.set(0,1.2,-1.2); scene.add(panel);
 const c1=renderer.xr.getController(0), c2=renderer.xr.getController(1);
-function ray(controller){ const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)]);
-  const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:0xffffff})); line.scale.z=2; controller.add(line); }
+function ray(controller){ const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)]); const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:0xffffff})); line.scale.z=2; controller.add(line); }
 ray(c1); ray(c2); scene.add(c1,c2);
 const RC=THREE.Raycaster, M4=THREE.Matrix4, V3=THREE.Vector3;
 const raycaster=new RC();
@@ -104,15 +121,15 @@ function handleSelect(ctrl){
 c1.addEventListener('selectstart',()=>handleSelect(c1));
 c2.addEventListener('selectstart',()=>handleSelect(c2));
 
-/* ---------- playlist / manifest & UI ---------- */
+/* ---------- playlist / UI ---------- */
 let playlist=[], index=-1;
 const playlistUI = document.getElementById('playlistUI');
 function renderPlaylist(){
+  if (!playlistUI) return;
   playlistUI.innerHTML='';
   playlist.forEach((e,i)=>{
     const div=document.createElement('div'); div.className='item'+(i===index?' active':'');
-    div.innerHTML = `<div class="title">${e.title||('Video '+(i+1))}</div>
-                     <div class="badge">${(e.mode||'2d').toUpperCase()}</div>`;
+    div.innerHTML = `<div class="title">${e.title||('Video '+(i+1))}</div><div class="badge">${(e.mode||'2d').toUpperCase()}</div>`;
     div.addEventListener('click', ()=> playIndex(i));
     playlistUI.appendChild(div);
   });
@@ -137,24 +154,33 @@ const prevBtn=document.getElementById('prevBtn');
 const nextBtn=document.getElementById('nextBtn');
 const fileInput=document.getElementById('fileInput');
 const loadManifestBtn=document.getElementById('loadManifestBtn');
-const curvedToggle=document.getElementById('curvedToggle');
+
+/* HUD refs */
+const hud = document.getElementById('hud');
+const hudPrev = document.getElementById('hudPrev');
+const hudPlay = document.getElementById('hudPlay');
+const hudNext = document.getElementById('hudNext');
+const hudList = document.getElementById('hudList');
+const titleNow = document.getElementById('titleNow');
 
 if (playBtn) playBtn.disabled = true;
 const hasSource = ()=> Boolean(video.currentSrc || video.src);
 
+function openOverlay(){ const ov=document.getElementById('overlay'); if(ov){ ov.style.display='flex'; } }
+function closeOverlay(){ const ov=document.getElementById('overlay'); if(ov){ ov.style.display='none'; } }
+function showHUD(on){ if (!hud) return; hud.style.display = on && !inXR() ? 'flex' : 'none'; }
+
 function applyScreenMode(entry){
   const use360 = is360(entry);
   sphere.visible = use360;
-  flatScreen.visible = !use360 && !curvedToggle.checked;
-  curvedScreen.visible = !use360 &&  curvedToggle.checked;
+  layoutScreens();
 }
 
 async function loadVideo(src){
   const token=++_loadToken;
   try{ video.pause(); }catch{}
-  video.removeAttribute('src');     // reset first (avoids abort noise on Firefox)
-  video.src = safeSrc(src);         // NOTE: do NOT call video.load()
-
+  video.removeAttribute('src');
+  video.src = safeSrc(src);           // do NOT call video.load()
   await new Promise(resolve=>{
     let settled=false;
     const onReady=()=>{ if(settled||token!==_loadToken) return; settled=true; cleanup(); resolve(); };
@@ -174,13 +200,12 @@ async function playIndex(i){
 
   applyScreenMode(entry);
   renderPlaylist();
+  titleNow && (titleNow.textContent = entry.title ? `• ${entry.title}` : '');
 
   await loadVideo(entry.url);
 
   try{
-    const pr = video.play();
-    if (pr) await pr;
-
+    const p = video.play(); if (p) await p;
     const started = await new Promise(resolve=>{
       let ok=false, t0=video.currentTime;
       const onTime = ()=>{ if(!ok && video.currentTime>t0){ ok=true; cleanup(); resolve(true); } };
@@ -196,7 +221,8 @@ async function playIndex(i){
     if (started){
       setStatus(`Playing ${index+1}/${playlist.length}: ${entry.title} (${is360(entry)?'360':'2D'})`);
       if (playBtn) playBtn.disabled=false;
-      document.getElementById('overlay').style.display='none';
+      closeOverlay();
+      showHUD(true);
     } else {
       setStatus('Playback didn’t advance. Click Play/Pause once (autoplay policy), then Start again.');
     }
@@ -207,21 +233,18 @@ async function playIndex(i){
 
 function next(){ if(playlist.length) playIndex(index+1); }
 function prev(){ if(playlist.length) playIndex(index-1); }
-function playPause(){
-  if (!hasSource() && playlist.length) { startFirst(); return; }
-  if (video.paused) video.play(); else video.pause();
-}
+function playPause(){ if (!hasSource() && playlist.length) { startFirst(); return; } if (video.paused) video.play(); else video.pause(); }
 
 /* auto-advance & shortcuts */
 video.addEventListener('ended', next);
 window.addEventListener('keydown', (e)=>{
   if (e.code === 'Space'){ e.preventDefault(); playPause(); }
-  if (e.key.toLowerCase() === 'n') next();
-  if (e.key.toLowerCase() === 'p') prev();
+  if (e.key?.toLowerCase() === 'n') next();
+  if (e.key?.toLowerCase() === 'p') prev();
+  if (e.key === 'Escape'){ openOverlay(); showHUD(true); }   // Esc brings playlist back
 });
 
 async function ensureInitialLoad(){ if(!playlist.length) await loadManifest(); if(!playlist.length) setStatus('No videos yet.'); }
-
 async function startFirst(){
   if (_starting) return;
   _starting = true;
@@ -233,32 +256,37 @@ async function startFirst(){
 }
 
 /* ---------- DOM ---------- */
-startBtn?.addEventListener('click', startFirst);
-enterVRBtn?.addEventListener('click', startFirst);
-playBtn?.addEventListener('click', playPause);
-prevBtn?.addEventListener('click', prev);
-nextBtn?.addEventListener('click', next);
-curvedToggle?.addEventListener('change', ()=>{
-  if (index >= 0 && playlist[index]) applyScreenMode(playlist[index]);
-});
+document.getElementById('startBtn')?.addEventListener('click', startFirst);
+document.getElementById('enterVRBtn')?.addEventListener('click', startFirst);
+document.getElementById('playBtn')?.addEventListener('click', playPause);
+document.getElementById('prevBtn')?.addEventListener('click', prev);
+document.getElementById('nextBtn')?.addEventListener('click', next);
+curvedToggle?.addEventListener('change', ()=> layoutScreens());
 
-fileInput?.addEventListener('change', ()=>{
-  const files=[...fileInput.files];
+document.getElementById('loadManifestBtn')?.addEventListener('click', async ()=>{
+  await loadManifest(); if (playlist.length && index===-1) { index=0; renderPlaylist(); }
+});
+document.getElementById('fileInput')?.addEventListener('change', ()=>{
+  const files=[...document.getElementById('fileInput').files];
   const newItems=files.map(f=>({ title:f.name, url:URL.createObjectURL(f), mode:/360/i.test(f.name)?'360':'2d' }));
-  playlist.push(...newItems);
-  renderPlaylist();
-  setStatus(`Added ${newItems.length} local file(s).`);
-  if (playBtn) playBtn.disabled=false;
+  playlist.push(...newItems); renderPlaylist(); setStatus(`Added ${newItems.length} local file(s).`);
+  document.getElementById('playBtn') && (document.getElementById('playBtn').disabled=false);
 });
-loadManifestBtn?.addEventListener('click', async ()=>{ await loadManifest(); if (playlist.length && index===-1) { index=0; renderPlaylist(); } });
 
-/* ---------- render ---------- */
-window.addEventListener('resize', ()=>{
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+/* HUD actions */
+hudPrev?.addEventListener('click', prev);
+hudPlay?.addEventListener('click', playPause);
+hudNext?.addEventListener('click', next);
+hudList?.addEventListener('click', ()=>{ openOverlay(); showHUD(true); });
+
+/* re-layout on changes */
+video.addEventListener('loadedmetadata', layoutScreens);
+window.addEventListener('resize', layoutScreens);
+renderer.xr.addEventListener?.('sessionstart', ()=>{ layoutScreens(); showHUD(false); }); // hide HUD in VR
+renderer.xr.addEventListener?.('sessionend',   ()=>{ layoutScreens(); showHUD(true); });
+
+/* render */
 renderer.setAnimationLoop(()=>{
-  if (forceUpdate) videoTexture.needsUpdate = true; // keep texture fresh
+  if (forceUpdate) videoTexture.needsUpdate = true;
   renderer.render(scene,camera);
 });
