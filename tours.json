@@ -1,13 +1,18 @@
 {
   "videos": [
     {
-      "title": "Sample 360 \u2014 replace with your MP4 URL",
-      "url": "https://storage.googleapis.com/vr360-videos/sample-360.mp4",
-      "mode": "360"
+      "title": "Sintel (2D sample)",
+      "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+      "mode": "2d"
     },
     {
-      "title": "Sample 2D walkthrough \u2014 replace with your MP4 URL",
-      "url": "https://storage.googleapis.com/vr360-videos/sample-2d.mp4",
+      "title": "Tears of Steel (2D sample)",
+      "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+      "mode": "2d"
+    },
+    {
+      "title": "Subaru Outback (2D sample)",
+      "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
       "mode": "2d"
     }
   ]
