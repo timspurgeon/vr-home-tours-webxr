@@ -3,7 +3,7 @@ import { VRButton } from 'https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRB
 
 /* ---------- helpers ---------- */
 function setStatus(msg){ const el=document.getElementById('status'); if(el) el.textContent=msg; console.log('[VRHomeTours]', msg); }
-function safeSrc(url){ if(!url) return url; return url.includes('://') ? url : encodeURI(url); }
+function safeSrc(url){ if(!url) return url; return url.includes('://') ? url : encodeURI(url); } // handles spaces safely
 
 /* ---------- renderer / scene ---------- */
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
@@ -17,9 +17,14 @@ scene.background = new THREE.Color(0x000000);
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
 scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-/* VR button only if supported */
+/* Show VR button only if WebXR is actually available */
 if (navigator.xr?.isSessionSupported) {
-  navigator.xr.isSessionSupported('immersive-vr').then(s => { if (s) document.body.appendChild(VRButton.createButton(renderer)); });
+  navigator.xr.isSessionSupported('immersive-vr').then(supported => {
+    if (supported) document.body.appendChild(VRButton.createButton(renderer));
+    else console.log('WebXR not supported here — 2D mode only.');
+  });
+} else {
+  console.log('WebXR API missing — 2D mode only.');
 }
 
 /* ---------- video / texture ---------- */
@@ -36,7 +41,7 @@ videoTexture.minFilter = THREE.LinearFilter;
 videoTexture.magFilter = THREE.LinearFilter;
 videoTexture.generateMipmaps = false;
 
-/* Force texture update every frame (some FF builds need this) */
+/* keep the texture “hot” for Firefox */
 let forceUpdate = false;
 video.addEventListener('playing', ()=>{ forceUpdate = true; });
 video.addEventListener('pause',   ()=>{ forceUpdate = false; });
@@ -49,29 +54,82 @@ video.addEventListener('error', () => {
   setStatus(`Video error: ${MAP[video.error?.code]||video.error?.code||'unknown'}. If 3/4, re-encode to H.264/AAC.`);
 });
 
-/* ---------- SIMPLE 2D SCREEN (flat plane) ---------- */
-const screen = new THREE.Mesh(
-  new THREE.PlaneGeometry(3.2, 1.8),
-  new THREE.MeshBasicMaterial({ map: videoTexture, side: THREE.FrontSide })
-);
-screen.position.set(0, 1.4, -2.2);
-scene.add(screen);
+/* ---------- screens / geometry ---------- */
+function buildCurvedScreen(width=3.2,height=1.8,fovDeg=95,distance=2.2){
+  const theta=THREE.MathUtils.degToRad(fovDeg), R=width/theta;
+  const geom=new THREE.CylinderGeometry(R,R,height,Math.max(12,Math.floor(fovDeg/2)),1,true,-theta/2,theta);
+  const mat=new THREE.MeshBasicMaterial({ map: videoTexture, side: THREE.FrontSide });
+  const mesh=new THREE.Mesh(geom,mat);
+  mesh.position.set(0,1.4,-(distance+R));
+  mesh.rotation.y=Math.PI;
+  return mesh;
+}
+const flatScreen = new THREE.Mesh(new THREE.PlaneGeometry(3.2,1.8), new THREE.MeshBasicMaterial({ map: videoTexture }));
+flatScreen.position.set(0,1.4,-2.2);
+scene.add(flatScreen);
 
-/* ---------- playlist / manifest ---------- */
+const curvedScreen = buildCurvedScreen(); // initially hidden
+curvedScreen.visible = false;
+scene.add(curvedScreen);
+
+const sphere = new THREE.Mesh(
+  new THREE.SphereGeometry(10, 64, 64),
+  new THREE.MeshBasicMaterial({ map: videoTexture, side: THREE.BackSide })
+);
+sphere.visible = false; scene.add(sphere);
+
+/* ---------- simple in-VR buttons (Prev/Play/Next) ---------- */
+const panel = new THREE.Group();
+const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.24), new THREE.MeshBasicMaterial({ color:0x111111 }));
+bg.position.set(0,0,0); panel.add(bg);
+function makeButton(label,x){ const g=new THREE.Group();
+  const base=new THREE.Mesh(new THREE.PlaneGeometry(0.25,0.12), new THREE.MeshBasicMaterial({ color:0x1e88e5 }));
+  base.position.set(x,0,0.001); base.userData.type=label; g.add(base); return g; }
+const btnPrev=makeButton('prev',-0.3), btnPlay=makeButton('play',0), btnNext=makeButton('next',0.3);
+panel.add(btnPrev,btnPlay,btnNext); panel.position.set(0,1.2,-1.2); scene.add(panel);
+const c1=renderer.xr.getController(0), c2=renderer.xr.getController(1);
+function ray(controller){ const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)]);
+  const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:0xffffff})); line.scale.z=2; controller.add(line); }
+ray(c1); ray(c2); scene.add(c1,c2);
+const RC=THREE.Raycaster, M4=THREE.Matrix4, V3=THREE.Vector3;
+const raycaster=new RC();
+function handleSelect(ctrl){
+  const mat=new M4().extractRotation(ctrl.matrixWorld);
+  const dir=new V3(0,0,-1).applyMatrix4(mat).normalize();
+  const origin=new V3().setFromMatrixPosition(ctrl.matrixWorld);
+  raycaster.set(origin,dir);
+  const hits=raycaster.intersectObjects([btnPrev.children[0],btnPlay.children[0],btnNext.children[0]]);
+  if(hits.length){ const t=hits[0].object.userData.type; if(t==='prev') prev(); else if(t==='play') playPause(); else next(); }
+}
+c1.addEventListener('selectstart',()=>handleSelect(c1));
+c2.addEventListener('selectstart',()=>handleSelect(c2));
+
+/* ---------- playlist / manifest & UI ---------- */
 let playlist=[], index=-1;
+const playlistUI = document.getElementById('playlistUI');
+function renderPlaylist(){
+  playlistUI.innerHTML='';
+  playlist.forEach((e,i)=>{
+    const div=document.createElement('div'); div.className='item'+(i===index?' active':'');
+    div.innerHTML = `<div class="title">${e.title||('Video '+(i+1))}</div>
+                     <div class="badge">${(e.mode||'2d').toUpperCase()}</div>`;
+    div.addEventListener('click', ()=> playIndex(i));
+    playlistUI.appendChild(div);
+  });
+}
 async function loadManifest(){
   try{
     const res=await fetch('./tours.json',{cache:'no-store'});
     if(!res.ok) throw new Error('tours.json not found');
     const data=await res.json();
-    if(Array.isArray(data.videos)){ playlist=data.videos; setStatus(`Loaded tours.json with ${playlist.length} video(s).`); }
+    if(Array.isArray(data.videos)){ playlist=data.videos; setStatus(`Loaded tours.json with ${playlist.length} video(s).`); renderPlaylist(); }
     else setStatus('tours.json has no "videos" array.');
   }catch(e){ setStatus(`Could not load tours.json (${e.message}).`); }
 }
+const is360 = e => (e.mode||'').toLowerCase().includes('360') || /360/i.test(e.title||'') || /360/i.test(e.url||'');
 
-/* ---------- playback (serialized loads, no .load()) ---------- */
+/* ---------- playback (debounced + serialized loads) ---------- */
 let _starting=false, _loadToken=0;
-
 const startBtn=document.getElementById('startBtn');
 const enterVRBtn=document.getElementById('enterVRBtn');
 const playBtn=document.getElementById('playBtn');
@@ -79,16 +137,24 @@ const prevBtn=document.getElementById('prevBtn');
 const nextBtn=document.getElementById('nextBtn');
 const fileInput=document.getElementById('fileInput');
 const loadManifestBtn=document.getElementById('loadManifestBtn');
-const debugBtn=document.getElementById('debugBtn');
+const curvedToggle=document.getElementById('curvedToggle');
 
 if (playBtn) playBtn.disabled = true;
 const hasSource = ()=> Boolean(video.currentSrc || video.src);
 
+function applyScreenMode(entry){
+  const use360 = is360(entry);
+  sphere.visible = use360;
+  flatScreen.visible = !use360 && !curvedToggle.checked;
+  curvedScreen.visible = !use360 &&  curvedToggle.checked;
+}
+
 async function loadVideo(src){
   const token=++_loadToken;
   try{ video.pause(); }catch{}
-  video.removeAttribute('src');
-  video.src = safeSrc(src);             // do NOT call video.load()
+  video.removeAttribute('src');     // reset first (avoids abort noise on Firefox)
+  video.src = safeSrc(src);         // NOTE: do NOT call video.load()
+
   await new Promise(resolve=>{
     let settled=false;
     const onReady=()=>{ if(settled||token!==_loadToken) return; settled=true; cleanup(); resolve(); };
@@ -106,13 +172,15 @@ async function playIndex(i){
   index=(i+playlist.length)%playlist.length;
   const entry=playlist[index];
 
+  applyScreenMode(entry);
+  renderPlaylist();
+
   await loadVideo(entry.url);
 
   try{
     const pr = video.play();
     if (pr) await pr;
 
-    // ensure it actually advances before hiding overlay
     const started = await new Promise(resolve=>{
       let ok=false, t0=video.currentTime;
       const onTime = ()=>{ if(!ok && video.currentTime>t0){ ok=true; cleanup(); resolve(true); } };
@@ -126,7 +194,7 @@ async function playIndex(i){
     });
 
     if (started){
-      setStatus(`Playing ${index+1}/${playlist.length}: ${entry.title}`);
+      setStatus(`Playing ${index+1}/${playlist.length}: ${entry.title} (${is360(entry)?'360':'2D'})`);
       if (playBtn) playBtn.disabled=false;
       document.getElementById('overlay').style.display='none';
     } else {
@@ -144,6 +212,14 @@ function playPause(){
   if (video.paused) video.play(); else video.pause();
 }
 
+/* auto-advance & shortcuts */
+video.addEventListener('ended', next);
+window.addEventListener('keydown', (e)=>{
+  if (e.code === 'Space'){ e.preventDefault(); playPause(); }
+  if (e.key.toLowerCase() === 'n') next();
+  if (e.key.toLowerCase() === 'p') prev();
+});
+
 async function ensureInitialLoad(){ if(!playlist.length) await loadManifest(); if(!playlist.length) setStatus('No videos yet.'); }
 
 async function startFirst(){
@@ -156,33 +232,25 @@ async function startFirst(){
   } finally { _starting = false; }
 }
 
-/* ---------- inline debug player ---------- */
-const inlineWrap=document.getElementById('inlineWrap');
-const inline=document.getElementById('inline');
-document.getElementById('closeInline')?.addEventListener('click',()=>{ inlineWrap.style.display='none'; inline.pause(); });
-
-debugBtn?.addEventListener('click', async ()=>{
-  await ensureInitialLoad();
-  inline.src = playlist.length ? safeSrc(playlist[0].url)
-                               : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
-  inlineWrap.style.display='block';
-  inline.play().catch(e=>setStatus('Inline play blocked: '+e.message));
-});
-
 /* ---------- DOM ---------- */
 startBtn?.addEventListener('click', startFirst);
 enterVRBtn?.addEventListener('click', startFirst);
 playBtn?.addEventListener('click', playPause);
 prevBtn?.addEventListener('click', prev);
 nextBtn?.addEventListener('click', next);
+curvedToggle?.addEventListener('change', ()=>{
+  if (index >= 0 && playlist[index]) applyScreenMode(playlist[index]);
+});
+
 fileInput?.addEventListener('change', ()=>{
   const files=[...fileInput.files];
   const newItems=files.map(f=>({ title:f.name, url:URL.createObjectURL(f), mode:/360/i.test(f.name)?'360':'2d' }));
   playlist.push(...newItems);
+  renderPlaylist();
   setStatus(`Added ${newItems.length} local file(s).`);
   if (playBtn) playBtn.disabled=false;
 });
-loadManifestBtn?.addEventListener('click', loadManifest);
+loadManifestBtn?.addEventListener('click', async ()=>{ await loadManifest(); if (playlist.length && index===-1) { index=0; renderPlaylist(); } });
 
 /* ---------- render ---------- */
 window.addEventListener('resize', ()=>{
@@ -191,7 +259,6 @@ window.addEventListener('resize', ()=>{
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 renderer.setAnimationLoop(()=>{
-  // hard nudge for Firefox: keep the texture “hot”
-  if (forceUpdate) videoTexture.needsUpdate = true;
+  if (forceUpdate) videoTexture.needsUpdate = true; // keep texture fresh
   renderer.render(scene,camera);
 });
