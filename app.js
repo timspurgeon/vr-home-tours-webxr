@@ -6,7 +6,7 @@ function setStatus(msg){
   const el = document.getElementById('status'); if (el) el.textContent = msg;
   console.log('[VRHomeTours]', msg);
 }
-function safeSrc(url){ if(!url) return url; return url.includes('://') ? url : encodeURI(url); } // spaces-safe
+function safeSrc(url){ if(!url) return url; return url.includes('://') ? url : encodeURI(url); } // handles spaces
 
 /* ---------- renderer / scene ---------- */
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
@@ -108,12 +108,24 @@ const is360 = e => (e.mode||'').toLowerCase().includes('360') || /360/i.test(e.t
 let _starting = false;
 let _loadToken = 0;
 
+const startBtn=document.getElementById('startBtn');
+const enterVRBtn=document.getElementById('enterVRBtn');
+const playBtn=document.getElementById('playBtn');
+const prevBtn=document.getElementById('prevBtn');
+const nextBtn=document.getElementById('nextBtn');
+const fileInput=document.getElementById('fileInput');
+const loadManifestBtn=document.getElementById('loadManifestBtn');
+
+// disable Play until we have a source
+if (playBtn) playBtn.disabled = true;
+
 function hasSource(){ return Boolean(video.currentSrc || video.src); }
 
 async function loadVideo(src){
   const token = ++_loadToken;              // cancel/ignore earlier loads
   try { video.pause(); } catch {}
-  // Do NOT call video.load(); Firefox aborts aggressively if you do
+  video.removeAttribute('src');            // reset first to avoid abort noise in Firefox
+  // Do NOT call video.load()
   video.src = safeSrc(src);
 
   // Wait until decodable (or soft timeout). Ignore if a newer load started.
@@ -158,6 +170,7 @@ async function playIndex(i){
 
     if (started){
       setStatus(`Playing ${index+1}/${playlist.length}: ${entry.title} (${is360(entry)?'360':'2D'})`);
+      if (playBtn) playBtn.disabled = false;
       document.getElementById('overlay').style.display = 'none';
     } else {
       setStatus('Playback didn’t advance. Click Play/Pause once (autoplay policy), then Start again.');
@@ -170,23 +183,14 @@ async function playIndex(i){
 function next(){ if(playlist.length) playIndex(index+1); }
 function prev(){ if(playlist.length) playIndex(index-1); }
 function playPause(){
-  // If user hits Play before Start, auto-start the first item instead of toggling an empty element
+  // If user hits Play before Start, auto-start the first item
   if (!hasSource() && playlist.length) { startFirst(); return; }
   if (video.paused) video.play(); else video.pause();
 }
 
-/* ---------- DOM ---------- */
-const startBtn=document.getElementById('startBtn');
-const enterVRBtn=document.getElementById('enterVRBtn');
-const playBtn=document.getElementById('playBtn');
-const prevBtn=document.getElementById('prevBtn');
-const nextBtn=document.getElementById('nextBtn');
-const fileInput=document.getElementById('fileInput');
-const loadManifestBtn=document.getElementById('loadManifestBtn');
-
 async function ensureInitialLoad(){ if(!playlist.length) await loadManifest(); if(!playlist.length) setStatus('No videos yet.'); }
 
-// One entry point so Start/EnterVR behave the same, and are debounced
+// Single entry so Start/EnterVR behave the same, and are debounced
 async function startFirst(){
   if (_starting) return;
   _starting = true;
@@ -199,20 +203,22 @@ async function startFirst(){
   }
 }
 
-startBtn.addEventListener('click', startFirst);
-enterVRBtn.addEventListener('click', startFirst);
+/* ---------- DOM ---------- */
+startBtn?.addEventListener('click', startFirst);
+enterVRBtn?.addEventListener('click', startFirst);
 
-playBtn.addEventListener('click', playPause);
-prevBtn.addEventListener('click', prev);
-nextBtn.addEventListener('click', next);
+playBtn?.addEventListener('click', playPause);
+prevBtn?.addEventListener('click', prev);
+nextBtn?.addEventListener('click', next);
 
-fileInput.addEventListener('change', ()=>{
+fileInput?.addEventListener('change', ()=>{
   const files=[...fileInput.files];
   const newItems = files.map(f => ({ title:f.name, url:URL.createObjectURL(f), mode:/360/i.test(f.name)?'360':'2d' }));
   playlist.push(...newItems);
   setStatus(`Added ${newItems.length} local file(s).`);
+  if (playBtn) playBtn.disabled = false;
 });
-loadManifestBtn.addEventListener('click', loadManifest);
+loadManifestBtn?.addEventListener('click', loadManifest);
 
 /* ---------- resize / render ---------- */
 window.addEventListener('resize', ()=>{
