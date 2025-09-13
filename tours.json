@@ -1,5 +1,8 @@
 {
   "videos": [
-    { "title": "Sample", "url": "./sample.mp4", "mode": "2d" }
+    { "title": "Home 1", "url": "./Home1.mp4", "mode": "2d" },
+    { "title": "Home 2", "url": "./Home2.mp4", "mode": "2d" },
+    { "title": "Home 3", "url": "./Home3.mp4", "mode": "2d" },
+    { "title": "Home 4", "url": "./Home4.mp4", "mode": "2d" }
   ]
 }
