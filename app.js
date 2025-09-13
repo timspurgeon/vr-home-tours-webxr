@@ -7,13 +7,6 @@ function setStatus(msg){
   console.log('[VRHomeTours]', msg);
 }
 function safeSrc(url){ if(!url) return url; return url.includes('://') ? url : encodeURI(url); }
-function waitForEvent(el, evt, ms=5000){
-  return new Promise((resolve,reject)=>{
-    let done=false, to=setTimeout(()=>{ if(!done){done=true; reject(new Error(evt+' timeout'));}}, ms);
-    const h=()=>{ if(!done){done=true; clearTimeout(to); el.removeEventListener(evt,h); resolve(); } };
-    el.addEventListener(evt,h,{once:true});
-  });
-}
 
 /* ---------- renderer / scene ---------- */
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
@@ -111,15 +104,27 @@ async function loadManifest(){
 }
 const is360 = e => (e.mode||'').toLowerCase().includes('360') || /360/i.test(e.title||'') || /360/i.test(e.url||'');
 
-/* ---------- core playback (hardened) ---------- */
+/* ---------- core playback (debounced + no .load()) ---------- */
+let _starting = false;
+
 async function loadVideo(src){
   video.pause();
-  video.src = safeSrc(src);
-  video.load();
-  try { await waitForEvent(video,'loadeddata', 8000); }
-  catch(e){ setStatus('Waited for loadeddata but timed out — check path/codec.'); }
-  // Kick a texture update once we have pixels:
-  if (video.readyState >= 2) { videoTexture.needsUpdate = true; }
+  video.src = safeSrc(src);   // no video.load(); Firefox can abort if you force it mid-pipeline
+  // Wait until it’s decodable or errors out
+  await new Promise((resolve, reject) => {
+    const onReady = () => { cleanup(); resolve(); };
+    const onErr   = () => { cleanup(); reject(video.error); };
+    const cleanup = () => {
+      video.removeEventListener('loadedmetadata', onReady);
+      video.removeEventListener('canplay', onReady);
+      video.removeEventListener('error', onErr);
+    };
+    video.addEventListener('loadedmetadata', onReady, { once:true });
+    video.addEventListener('canplay', onReady, { once:true });
+    video.addEventListener('error', onErr, { once:true });
+    // soft timeout (8s) just to report something useful
+    setTimeout(()=>{ cleanup(); resolve(); }, 8000);
+  });
 }
 
 async function playIndex(i){
@@ -133,9 +138,10 @@ async function playIndex(i){
   await loadVideo(entry.url);
 
   try{
-    const playPromise = video.play();
-    if (playPromise) await playPromise;
-    // Wait until we actually see playback progress:
+    const p = video.play();
+    if (p) await p;
+
+    // Ensure playback actually advances before hiding overlay
     const started = await new Promise(resolve=>{
       let ok=false, t0=video.currentTime;
       const onTime = ()=>{ if(!ok && video.currentTime > t0){ ok=true; cleanup(); resolve(true); } };
@@ -145,16 +151,17 @@ async function playIndex(i){
       video.addEventListener('timeupdate', onTime);
       video.addEventListener('playing', onPlay);
       video.addEventListener('error', onErr);
-      setTimeout(()=>{ if(!ok){ cleanup(); resolve(false);} }, 4000);
+      setTimeout(()=>{ if(!ok){ cleanup(); resolve(false); } }, 4000);
     });
+
     if (started){
       setStatus(`Playing ${index+1}/${playlist.length}: ${entry.title} (${is360(entry)?'360':'2D'})`);
       document.getElementById('overlay').style.display = 'none';
     } else {
-      setStatus('Playback didn’t advance. Press Play/Pause once, then click Start again (autoplay policy).');
+      setStatus('Playback didn’t advance. Click Play/Pause once (autoplay policy), then Start again.');
     }
   }catch(e){
-    setStatus(`Autoplay blocked: ${e.message}. Click Play/Pause once, then Start again.`);
+    setStatus(`Autoplay blocked: ${e && e.message ? e.message : e}. Click Play/Pause once, then Start again.`);
   }
 }
 
@@ -174,21 +181,46 @@ const loadManifestBtn=document.getElementById('loadManifestBtn');
 async function ensureInitialLoad(){ if(!playlist.length) await loadManifest(); if(!playlist.length) setStatus('No videos yet.'); }
 
 startBtn.addEventListener('click', async ()=>{
-  await ensureInitialLoad();
-  if(!playlist.length) return setStatus('No videos found.');
-  await playIndex(0);
+  if (_starting) return;
+  _starting = true;
+  try{
+    await ensureInitialLoad();
+    if(!playlist.length) return setStatus('No videos found.');
+    await playIndex(0);
+  } finally {
+    _starting = false;
+  }
 });
 
 enterVRBtn.addEventListener('click', async ()=>{
-  await ensureInitialLoad();
-  if(!playlist.length) return setStatus('No videos found.');
-  await playIndex(0);
-  // VRButton handles session
+  if (_starting) return;
+  _starting = true;
+  try{
+    await ensureInitialLoad();
+    if(!playlist.length) return setStatus('No videos found.');
+    await playIndex(0);
+    // VRButton manages session
+  } finally {
+    _starting = false;
+  }
 });
 
 playBtn.addEventListener('click', playPause);
 prevBtn.addEventListener('click', prev);
 nextBtn.addEventListener('click', next);
+
 fileInput.addEventListener('change', ()=>{
   const files=[...fileInput.files];
-  const newItems = files.map(f => ({ tit
+  const newItems = files.map(f => ({ title:f.name, url:URL.createObjectURL(f), mode:/360/i.test(f.name)?'360':'2d' }));
+  playlist.push(...newItems);
+  setStatus(`Added ${newItems.length} local file(s).`);
+});
+loadManifestBtn.addEventListener('click', loadManifest);
+
+/* ---------- resize / render ---------- */
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+renderer.setAnimationLoop(()=>{ renderer.render(scene, camera); });
