@@ -9,7 +9,7 @@
     html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
     #overlay{
       position:fixed;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;
-      background:radial-gradient(ellipse at center,rgba(0,0,0,.75),rgba(0,0,0,.95));padding:18px;text-align:center
+      background:radial-gradient(ellipse at center,rgba(0,0,0,.75),rgba(0,0,0,.95));padding:18px;text-align:center;z-index:20
     }
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}
     .btn{padding:10px 16px;background:#1e88e5;color:#fff;border-radius:10px;border:0;font-weight:600;cursor:pointer}
@@ -21,13 +21,20 @@
       max-height:220px;overflow:auto;width:min(680px,90vw);background:#0d0d0d;border:1px solid #222;border-radius:12px;padding:8px
     }
     #playlistUI{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
-    .item{
-      border:1px solid #222;border-radius:10px;padding:8px;cursor:pointer;background:#121212
-    }
+    .item{border:1px solid #222;border-radius:10px;padding:8px;cursor:pointer;background:#121212}
     .item.active{border-color:#1e88e5;box-shadow:0 0 0 2px rgba(30,136,229,.35) inset}
     .title{font-size:12px;opacity:.9}
     .badge{font-size:10px;opacity:.7}
     .switch{display:flex;align-items:center;gap:6px;font-size:13px;opacity:.9}
+
+    /* HUD control bar (always on desktop) */
+    #hud{
+      position:fixed;left:50%;bottom:16px;transform:translateX(-50%);
+      display:none;align-items:center;gap:8px;
+      background:rgba(10,10,10,.6);backdrop-filter:blur(6px);
+      border:1px solid #222;border-radius:12px;padding:8px 10px;z-index:15
+    }
+    #titleNow{font-size:12px;opacity:.9;margin:0 6px}
   </style>
 </head>
 <body>
@@ -58,7 +65,16 @@
       </div>
     </div>
 
-    <div id="status">Load <b>tours.json</b>, select a video, then click <b>Start</b>. (Space=Play/Pause, N/P=Next/Prev)</div>
+    <div id="status">Load <b>tours.json</b>, select a video, then click <b>Start</b>. (Space=Play/Pause, N/P=Next/Prev, Esc=Playlist)</div>
+  </div>
+
+  <!-- HUD: always-on controls during playback -->
+  <div id="hud">
+    <button id="hudPrev" class="btn secondary">Prev</button>
+    <button id="hudPlay" class="btn secondary">Play/Pause</button>
+    <button id="hudNext" class="btn secondary">Next</button>
+    <span id="titleNow"></span>
+    <button id="hudList" class="btn">Playlist</button>
   </div>
 
   <script type="module" src="./app.js"></script>
