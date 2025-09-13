@@ -112,13 +112,12 @@ function hasSource(){ return Boolean(video.currentSrc || video.src); }
 
 async function loadVideo(src){
   const token = ++_loadToken;              // cancel previous loads
-  // stop any current fetch/play politely
   try { video.pause(); } catch {}
-  video.removeAttribute('src');            // reset element to avoid Firefox abort noise
-  // NOTE: do NOT call video.load() here — setting src is enough
+  video.removeAttribute('src');            // reset to avoid Firefox abort noise
+  // NOTE: do NOT call video.load()
   video.src = safeSrc(src);
 
-  // Wait until it's decodable (or we time out) — ignore if a newer load started
+  // Wait until it's decodable (or we time out). Ignore if a newer load started.
   await new Promise(resolve=>{
     let settled=false;
     const onReady = ()=>{ if(settled || token!==_loadToken) return; settled=true; cleanup(); resolve(); };
@@ -142,7 +141,7 @@ async function playIndex(i){
   await loadVideo(entry.url);
 
   try{
-    const p = video.play();              // may reject on first gesture, we catch it
+    const p = video.play();
     if (p) await p;
 
     // Ensure playback actually advances before hiding overlay
@@ -172,7 +171,8 @@ async function playIndex(i){
 function next(){ if(playlist.length) playIndex(index+1); }
 function prev(){ if(playlist.length) playIndex(index-1); }
 function playPause(){
-  if (!hasSource() && playlist.length) { playIndex(index === -1 ? 0 : index); return; }
+  // If user hits Play before Start, auto-start the first playlist item instead of toggling the empty element
+  if (!hasSource() && playlist.length) { startFirst(); return; }
   if (video.paused) video.play(); else video.pause();
 }
 
@@ -187,6 +187,7 @@ const loadManifestBtn=document.getElementById('loadManifestBtn');
 
 async function ensureInitialLoad(){ if(!playlist.length) await loadManifest(); if(!playlist.length) setStatus('No videos yet.'); }
 
+// single entry point so Start/EnterVR behave the same, and are debounced
 async function startFirst(){
   if (_starting) return;
   _starting = true;
