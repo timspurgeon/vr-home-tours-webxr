@@ -6,7 +6,7 @@ function setStatus(msg){
   const el = document.getElementById('status'); if (el) el.textContent = msg;
   console.log('[VRHomeTours]', msg);
 }
-function safeSrc(url){ if(!url) return url; return url.includes('://') ? url : encodeURI(url); }
+function safeSrc(url){ if(!url) return url; return url.includes('://') ? url : encodeURI(url); } // spaces-safe
 
 /* ---------- renderer / scene ---------- */
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
@@ -64,7 +64,7 @@ function buildCurvedScreen(width=3.2, height=1.8, fovDeg=95, distance=2.2){
 }
 const screen = buildCurvedScreen(); screen.visible = false; scene.add(screen);
 
-/* ---------- VR panel buttons ---------- */
+/* ---------- simple VR buttons ---------- */
 const panel = new THREE.Group();
 const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.24), new THREE.MeshBasicMaterial({ color:0x111111 }));
 bg.position.set(0,0,0); panel.add(bg);
@@ -104,26 +104,30 @@ async function loadManifest(){
 }
 const is360 = e => (e.mode||'').toLowerCase().includes('360') || /360/i.test(e.title||'') || /360/i.test(e.url||'');
 
-/* ---------- core playback (debounced + no .load()) ---------- */
+/* ---------- core playback (debounced + serialized loads) ---------- */
 let _starting = false;
+let _loadToken = 0;
+
+function hasSource(){ return Boolean(video.currentSrc || video.src); }
 
 async function loadVideo(src){
-  video.pause();
-  video.src = safeSrc(src);   // no video.load(); Firefox can abort if you force it mid-pipeline
-  // Wait until it’s decodable or errors out
-  await new Promise((resolve, reject) => {
-    const onReady = () => { cleanup(); resolve(); };
-    const onErr   = () => { cleanup(); reject(video.error); };
-    const cleanup = () => {
-      video.removeEventListener('loadedmetadata', onReady);
-      video.removeEventListener('canplay', onReady);
-      video.removeEventListener('error', onErr);
-    };
+  const token = ++_loadToken;              // cancel previous loads
+  // stop any current fetch/play politely
+  try { video.pause(); } catch {}
+  video.removeAttribute('src');            // reset element to avoid Firefox abort noise
+  // NOTE: do NOT call video.load() here — setting src is enough
+  video.src = safeSrc(src);
+
+  // Wait until it's decodable (or we time out) — ignore if a newer load started
+  await new Promise(resolve=>{
+    let settled=false;
+    const onReady = ()=>{ if(settled || token!==_loadToken) return; settled=true; cleanup(); resolve(); };
+    const onErr   = ()=>{ if(settled || token!==_loadToken) return; settled=true; cleanup(); resolve(); };
+    const cleanup = ()=>{ video.removeEventListener('loadedmetadata', onReady); video.removeEventListener('canplay', onReady); video.removeEventListener('error', onErr); };
     video.addEventListener('loadedmetadata', onReady, { once:true });
     video.addEventListener('canplay', onReady, { once:true });
     video.addEventListener('error', onErr, { once:true });
-    // soft timeout (8s) just to report something useful
-    setTimeout(()=>{ cleanup(); resolve(); }, 8000);
+    setTimeout(()=>{ if(!settled){ settled=true; cleanup(); resolve(); }}, 8000);
   });
 }
 
@@ -138,7 +142,7 @@ async function playIndex(i){
   await loadVideo(entry.url);
 
   try{
-    const p = video.play();
+    const p = video.play();              // may reject on first gesture, we catch it
     if (p) await p;
 
     // Ensure playback actually advances before hiding overlay
@@ -161,13 +165,16 @@ async function playIndex(i){
       setStatus('Playback didn’t advance. Click Play/Pause once (autoplay policy), then Start again.');
     }
   }catch(e){
-    setStatus(`Autoplay blocked: ${e && e.message ? e.message : e}. Click Play/Pause once, then Start again.`);
+    setStatus(`Autoplay blocked or interrupted: ${e && e.message ? e.message : e}. Click Play/Pause once, then Start again.`);
   }
 }
 
 function next(){ if(playlist.length) playIndex(index+1); }
 function prev(){ if(playlist.length) playIndex(index-1); }
-function playPause(){ if(video.paused) video.play(); else video.pause(); }
+function playPause(){
+  if (!hasSource() && playlist.length) { playIndex(index === -1 ? 0 : index); return; }
+  if (video.paused) video.play(); else video.pause();
+}
 
 /* ---------- DOM ---------- */
 const startBtn=document.getElementById('startBtn');
@@ -180,30 +187,20 @@ const loadManifestBtn=document.getElementById('loadManifestBtn');
 
 async function ensureInitialLoad(){ if(!playlist.length) await loadManifest(); if(!playlist.length) setStatus('No videos yet.'); }
 
-startBtn.addEventListener('click', async ()=>{
+async function startFirst(){
   if (_starting) return;
   _starting = true;
   try{
     await ensureInitialLoad();
     if(!playlist.length) return setStatus('No videos found.');
-    await playIndex(0);
+    await playIndex(index === -1 ? 0 : index);
   } finally {
     _starting = false;
   }
-});
+}
 
-enterVRBtn.addEventListener('click', async ()=>{
-  if (_starting) return;
-  _starting = true;
-  try{
-    await ensureInitialLoad();
-    if(!playlist.length) return setStatus('No videos found.');
-    await playIndex(0);
-    // VRButton manages session
-  } finally {
-    _starting = false;
-  }
-});
+startBtn.addEventListener('click', startFirst);
+enterVRBtn.addEventListener('click', startFirst);
 
 playBtn.addEventListener('click', playPause);
 prevBtn.addEventListener('click', prev);
