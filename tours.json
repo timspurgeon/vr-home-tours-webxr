@@ -1,19 +1,5 @@
 {
   "videos": [
-    {
-      "title": "Sintel (2D sample)",
-      "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
-      "mode": "2d"
-    },
-    {
-      "title": "Tears of Steel (2D sample)",
-      "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
-      "mode": "2d"
-    },
-    {
-      "title": "Subaru Outback (2D sample)",
-      "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackOnStreetAndDirt.mp4",
-      "mode": "2d"
-    }
+    { "title": "Repo sample", "url": "./sample.mp4", "mode": "2d" }
   ]
 }
