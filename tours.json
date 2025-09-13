@@ -1,19 +1,5 @@
 {
   "videos": [
-    {
-      "title": "Sintel (2D sample)",
-      "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
-      "mode": "2d"
-    },
-    {
-      "title": "Tears of Steel (2D sample)",
-      "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
-      "mode": "2d"
-    },
-    {
-      "title": "Congo rainforest (360 sample)",
-      "url": "https://storage.googleapis.com/vrview/examples/video/congo_2048.mp4",
-      "mode": "360"
-    }
+    { "title": "Repo sample", "url": "./Screen Recording 2025-08-14 163435.mp4", "mode": "2d" }
   ]
 }
