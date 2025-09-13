@@ -3,48 +3,64 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>VR Home Tours — Test</title>
+  <title>VR Home Tours</title>
   <style>
-    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,sans-serif}
-    #overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
-      background:radial-gradient(ellipse at center,rgba(0,0,0,.75),rgba(0,0,0,.95));padding:18px;text-align:center}
+    :root { color-scheme: dark; }
+    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+    #overlay{
+      position:fixed;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;
+      background:radial-gradient(ellipse at center,rgba(0,0,0,.75),rgba(0,0,0,.95));padding:18px;text-align:center
+    }
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}
-    .btn{padding:10px 16px;background:#1e88e5;color:#fff;border-radius:8px;border:0;font-weight:600;cursor:pointer}
+    .btn{padding:10px 16px;background:#1e88e5;color:#fff;border-radius:10px;border:0;font-weight:600;cursor:pointer}
+    .btn.secondary{background:#333}
     .btn:disabled{opacity:.5;cursor:not-allowed}
-    #status{opacity:.9;font-size:13px;max-width:900px}
-    #inlineWrap{display:none;position:fixed;right:12px;bottom:12px;width:420px;background:#111;border-radius:10px;padding:8px;z-index:9999}
-    #inline{width:100%;max-height:240px;background:#000}
+    #status{opacity:.9;font-size:13px;max-width:940px}
+    #controls{display:flex;flex-direction:column;gap:10px;align-items:center}
+    #playlistWrap{
+      max-height:220px;overflow:auto;width:min(680px,90vw);background:#0d0d0d;border:1px solid #222;border-radius:12px;padding:8px
+    }
+    #playlistUI{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+    .item{
+      border:1px solid #222;border-radius:10px;padding:8px;cursor:pointer;background:#121212
+    }
+    .item.active{border-color:#1e88e5;box-shadow:0 0 0 2px rgba(30,136,229,.35) inset}
+    .title{font-size:12px;opacity:.9}
+    .badge{font-size:10px;opacity:.7}
+    .switch{display:flex;align-items:center;gap:6px;font-size:13px;opacity:.9}
   </style>
 </head>
 <body>
   <div id="overlay">
-    <h1>VR Home Tours</h1>
-    <div class="row">
-      <button id="startBtn" class="btn">Start (2D)</button>
-      <button id="enterVRBtn" class="btn">Enter VR</button>
-      <button id="loadManifestBtn" class="btn">Load tours.json</button>
-      <button id="playBtn" class="btn">Play/Pause</button>
-      <button id="prevBtn" class="btn">Prev</button>
-      <button id="nextBtn" class="btn">Next</button>
-    </div>
-    <div class="row">
-      <label class="btn">
-        <input id="fileInput" type="file" accept="video/mp4,video/webm" multiple style="display:none;">Add Local Videos
-      </label>
-      <button id="debugBtn" class="btn">Debug: Play Inline</button>
-    </div>
-    <div id="status">Load <b>tours.json</b>, then click <b>Start</b>. If autoplay is blocked, click <b>Play/Pause</b> once, then Start again.</div>
-  </div>
+    <h1 style="margin:0 0 4px 0">VR Home Tours</h1>
 
-  <div id="inlineWrap">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-      <div>Inline player (debug)</div>
-      <button id="closeInline" class="btn" style="padding:6px 10px;">Close</button>
+    <div id="controls">
+      <div class="row">
+        <button id="startBtn" class="btn">Start (2D in Page)</button>
+        <button id="enterVRBtn" class="btn">Enter VR</button>
+        <button id="playBtn" class="btn secondary">Play/Pause</button>
+        <button id="prevBtn" class="btn secondary">Prev</button>
+        <button id="nextBtn" class="btn secondary">Next</button>
+        <label class="switch">
+          <input type="checkbox" id="curvedToggle"> Theater screen (curved)
+        </label>
+      </div>
+
+      <div class="row">
+        <button id="loadManifestBtn" class="btn secondary">Load tours.json</button>
+        <label class="btn">
+          <input id="fileInput" type="file" accept="video/mp4,video/webm" multiple style="display:none;">Add Local Videos
+        </label>
+      </div>
+
+      <div id="playlistWrap">
+        <div id="playlistUI"></div>
+      </div>
     </div>
-    <video id="inline" controls playsinline muted></video>
+
+    <div id="status">Load <b>tours.json</b>, select a video, then click <b>Start</b>. (Space=Play/Pause, N/P=Next/Prev)</div>
   </div>
 
   <script type="module" src="./app.js"></script>
 </body>
 </html>
-
