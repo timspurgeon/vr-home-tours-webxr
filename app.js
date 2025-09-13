@@ -111,13 +111,12 @@ let _loadToken = 0;
 function hasSource(){ return Boolean(video.currentSrc || video.src); }
 
 async function loadVideo(src){
-  const token = ++_loadToken;              // cancel previous loads
+  const token = ++_loadToken;              // cancel/ignore earlier loads
   try { video.pause(); } catch {}
-  video.removeAttribute('src');            // reset to avoid Firefox abort noise
-  // NOTE: do NOT call video.load()
+  // Do NOT call video.load(); Firefox aborts aggressively if you do
   video.src = safeSrc(src);
 
-  // Wait until it's decodable (or we time out). Ignore if a newer load started.
+  // Wait until decodable (or soft timeout). Ignore if a newer load started.
   await new Promise(resolve=>{
     let settled=false;
     const onReady = ()=>{ if(settled || token!==_loadToken) return; settled=true; cleanup(); resolve(); };
@@ -171,7 +170,7 @@ async function playIndex(i){
 function next(){ if(playlist.length) playIndex(index+1); }
 function prev(){ if(playlist.length) playIndex(index-1); }
 function playPause(){
-  // If user hits Play before Start, auto-start the first playlist item instead of toggling the empty element
+  // If user hits Play before Start, auto-start the first item instead of toggling an empty element
   if (!hasSource() && playlist.length) { startFirst(); return; }
   if (video.paused) video.play(); else video.pause();
 }
@@ -187,7 +186,7 @@ const loadManifestBtn=document.getElementById('loadManifestBtn');
 
 async function ensureInitialLoad(){ if(!playlist.length) await loadManifest(); if(!playlist.length) setStatus('No videos yet.'); }
 
-// single entry point so Start/EnterVR behave the same, and are debounced
+// One entry point so Start/EnterVR behave the same, and are debounced
 async function startFirst(){
   if (_starting) return;
   _starting = true;
